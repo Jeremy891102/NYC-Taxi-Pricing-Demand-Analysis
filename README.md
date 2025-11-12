@@ -92,7 +92,7 @@ nyc-taxi-pricing-analysis/
 
 ---
 
-### Module 3: Supply-Demand Imbalance Analysis
+### Module 3: Supply-Demand Imbalance Analysis - Royan
 
 **Objective:** Identify high-demand, low-supply opportunities for price adjustments
 
