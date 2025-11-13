@@ -77,7 +77,18 @@ class TLCDataLoader:
         self.files = sorted(glob(str(self.data_dir / "fhvhv_tripdata_*.parquet")))
         if not self.files:
             raise FileNotFoundError(f"No parquet files found under {self.data_dir}")
+        # Cache raw column names (lazy load on first use)
+        self._raw_columns = None
         print(f"🚀 TLCDataLoader initialized with {len(self.files)} monthly files.")
+    
+    # ========== Helper: Get raw column names ==========
+    def _get_raw_columns(self) -> List[str]:
+        """Get all column names from the raw parquet files."""
+        if self._raw_columns is None:
+            # Read schema from first file
+            lf = pl.scan_parquet(self.files[0])
+            self._raw_columns = lf.collect_schema().names()
+        return self._raw_columns
 
     # ========== Helper: Select files to read ==========
     def _select_files(self, months: Optional[List[str]] = None) -> List[str]:
@@ -87,21 +98,27 @@ class TLCDataLoader:
         print(f"📂 Selected {len(selected)} files: {[Path(f).name for f in selected]}")
         return selected
 
-    # ========== Helper: Determine required raw columns ==========
+    # ========== Helper: Validate and return requested columns ==========
     def _required_columns(self, features: List[str]) -> List[str]:
-        cols = set()
+        """
+        Validate that requested features exist as raw columns.
+        Returns the list of columns to load (no preprocessing/derivation).
+        """
+        raw_cols = self._get_raw_columns()
+        invalid_cols = []
+        
         for f in features:
-            if f not in self.FEATURE_MAP:
-                raise ValueError(f"❌ Feature '{f}' not defined in FEATURE_MAP.")
-            cols.update(self.FEATURE_MAP[f]["requires"])
-        return list(cols)
+            if f not in raw_cols:
+                invalid_cols.append(f)
+        
+        if invalid_cols:
+            raise ValueError(
+                f"❌ Column(s) not found: {invalid_cols}\n"
+                f"   Available columns: {raw_cols[:20]}..." if len(raw_cols) > 20 else f"   Available columns: {raw_cols}"
+            )
+        
+        return features
 
-    # ========== Helper: Add derived features ==========
-    def _derive_features(self, df: pl.LazyFrame, features: List[str]) -> pl.LazyFrame:
-        for f in features:
-            expr = self.FEATURE_MAP[f]["derive"]
-            df = df.with_columns(expr)
-        return df
 
     # ========== Main function ==========
     def load(
@@ -112,14 +129,15 @@ class TLCDataLoader:
         collect: bool = True
     ) -> pl.DataFrame:
         """
-        Load dataset with only the requested features.
+        Load dataset with only the requested raw columns.
 
         Parameters
         ----------
         features : List[str]
-            Feature names defined in FEATURE_MAP.
+            Raw column names from the parquet files (e.g., "PULocationID", "trip_miles", "pickup_datetime").
+            Users should compute derived features themselves after loading.
         months : List[str], optional
-            e.g. ["2023-01", "2023-02"]
+            e.g. ["2024-01", "2024-02"]
         sample_ratio : float, optional
             Fraction of data to load for testing (0 < r ≤ 1.0)
         collect : bool, optional
@@ -128,60 +146,79 @@ class TLCDataLoader:
         Returns
         -------
         pl.DataFrame or pl.LazyFrame
+            DataFrame with only the requested columns. No preprocessing or feature derivation.
         """
         files = self._select_files(months)
+        # Only load columns needed for the requested features
         cols = self._required_columns(features)
-        # Ensure data cleaning columns are always loaded
-        cleaning_cols = ["trip_miles", "base_passenger_fare", "trip_time"]
-        cols = list(set(cols + cleaning_cols))
         print(f"🔍 Loading columns: {cols}")
 
         # Read parquet files and normalize datetime precision to avoid schema mismatch
+        # Only normalize datetime columns that the user actually requested
         lazy_frames = []
         for f in files:
             lf = pl.scan_parquet(f)
-            # Force datetime columns to microseconds precision for consistency
-            # This fixes schema mismatch errors when different months have different precisions (ns vs μs)
-            if "pickup_datetime" in lf.columns:
-                lf = lf.with_columns(
-                    pl.col("pickup_datetime").cast(pl.Datetime("us"))
-                )
+            # Get schema to check column types
+            schema = lf.collect_schema()
+            
+            # Only normalize datetime columns that are in the requested columns
+            datetime_cols_to_normalize = []
+            for col_name in cols:
+                if col_name in schema:
+                    dtype = schema[col_name]
+                    # Check if it's a datetime type (could be Datetime("ns"), Datetime("us"), etc.)
+                    if isinstance(dtype, pl.Datetime):
+                        datetime_cols_to_normalize.append(col_name)
+            
+            # Normalize datetime precision to microseconds for consistency
+            if datetime_cols_to_normalize:
+                cast_exprs = [
+                    pl.col(col).cast(pl.Datetime("us"))
+                    for col in datetime_cols_to_normalize
+                ]
+                lf = lf.with_columns(cast_exprs)
+            
             lazy_frames.append(lf.select(cols))
         
         df = pl.concat(lazy_frames, how="vertical")
 
-        # Basic data cleaning
-        df = (
-            df.filter(pl.col("trip_miles") > 0)
-              .filter(pl.col("trip_miles") < 100)
-              .filter(pl.col("base_passenger_fare") > 0)
-              .filter(pl.col("trip_time") > 0)
-        )
-
-        # Add derived features
-        df = self._derive_features(df, features)
+        # No automatic data cleaning or feature derivation
+        # Users should handle data cleaning and feature engineering themselves
 
         # Sampling (for quick testing)
         # Use hash-based sampling on LazyFrame to avoid loading all data into memory
         if sample_ratio < 1.0:
-            # Use hash of trip_miles and base_passenger_fare for deterministic sampling
-            # These columns are always loaded due to data cleaning filters
-            # Hash value modulo 100 gives us a way to sample
             threshold = int(sample_ratio * 100)
-            # Combine hashes of multiple columns for better distribution
-            df = df.filter(
-                ((pl.col("trip_miles").hash(seed=42) + pl.col("base_passenger_fare").hash(seed=42)) % 100) < threshold
-            )
+            # Use available columns for sampling (prefer numeric columns)
+            # Try to use columns that are likely to be loaded
+            sampling_cols = []
+            for col in ["trip_miles", "base_passenger_fare", "PULocationID", "pickup_datetime"]:
+                if col in cols:
+                    sampling_cols.append(col)
+            
+            if len(sampling_cols) >= 2:
+                # Use multiple columns for better distribution
+                hash_expr = pl.col(sampling_cols[0]).hash(seed=42) + pl.col(sampling_cols[1]).hash(seed=42)
+                df = df.filter((hash_expr % 100) < threshold)
+            elif len(sampling_cols) == 1:
+                # Use single column
+                df = df.filter((pl.col(sampling_cols[0]).hash(seed=42) % 100) < threshold)
+            else:
+                # Fallback: use first available column
+                if len(cols) > 0:
+                    df = df.filter((pl.col(cols[0]).hash(seed=42) % 100) < threshold)
 
-        print(f"⚙️ Ready features: {features}")
+        print(f"⚙️ Ready columns: {features}")
+        # Return only requested columns (no derivation)
         return df.select(features).collect() if collect else df.select(features)
 
-    # ========== Helper function: List available features ==========
+    # ========== Helper function: List available columns ==========
     def list_features(self):
-        """Print all available features."""
-        print("\n📋 Available Features:")
-        for f in self.FEATURE_MAP:
-            print(f" - {f}")
+        """Print all available raw columns from the parquet files."""
+        raw_cols = self._get_raw_columns()
+        print(f"\n📋 Available Columns ({len(raw_cols)} total):")
+        for col in raw_cols:
+            print(f" - {col}")
 
     # ========== Batch loading function ==========
     def load_in_batches(
