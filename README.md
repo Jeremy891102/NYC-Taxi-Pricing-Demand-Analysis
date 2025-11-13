@@ -1,7 +1,5 @@
 🚕 NYC Taxi Pricing & Demand Analysis
 
-Author: Jeremy Hsu | NYU Data Science
-
 A large-scale analysis of NYC Taxi (TLC High Volume FHV) data —
 uncovering how price, demand, and revenue interact across time and space.
 
