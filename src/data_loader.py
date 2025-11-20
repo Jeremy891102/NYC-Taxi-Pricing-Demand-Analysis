@@ -1,9 +1,9 @@
 """
 NYC TLC High Volume FHV DataLoader (Production Ready)
 ------------------------------------------------------
-✅ Unified Polars DataLoader for 250M+ rows
-✅ Modular, memory-efficient, and team-friendly
-✅ Supports feature selection and month-based loading
+Unified Polars DataLoader for 250M+ rows
+Modular, memory-efficient, and team-friendly
+Supports feature selection and month-based loading
 ------------------------------------------------------
 """
 
@@ -79,7 +79,7 @@ class TLCDataLoader:
             raise FileNotFoundError(f"No parquet files found under {self.data_dir}")
         # Cache raw column names (lazy load on first use)
         self._raw_columns = None
-        print(f"🚀 TLCDataLoader initialized with {len(self.files)} monthly files.")
+        print(f"TLCDataLoader initialized with {len(self.files)} monthly files.")
     
     # ========== Helper: Get raw column names ==========
     def _get_raw_columns(self) -> List[str]:
@@ -95,7 +95,7 @@ class TLCDataLoader:
         if not months:
             return self.files
         selected = [f for f in self.files if any(m in f for m in months)]
-        print(f"📂 Selected {len(selected)} files: {[Path(f).name for f in selected]}")
+        print(f"Selected {len(selected)} files: {[Path(f).name for f in selected]}")
         return selected
 
     # ========== Helper: Validate and return requested columns ==========
@@ -113,8 +113,8 @@ class TLCDataLoader:
         
         if invalid_cols:
             raise ValueError(
-                f"❌ Column(s) not found: {invalid_cols}\n"
-                f"   Available columns: {raw_cols[:20]}..." if len(raw_cols) > 20 else f"   Available columns: {raw_cols}"
+                f"Column(s) not found: {invalid_cols}\n"
+                f"Available columns: {raw_cols[:20]}..." if len(raw_cols) > 20 else f"   Available columns: {raw_cols}"
             )
         
         return features
@@ -151,7 +151,7 @@ class TLCDataLoader:
         files = self._select_files(months)
         # Only load columns needed for the requested features
         cols = self._required_columns(features)
-        print(f"🔍 Loading columns: {cols}")
+        print(f"Loading columns: {cols}")
 
         # Read parquet files and normalize datetime precision to avoid schema mismatch
         # Only normalize datetime columns that the user actually requested
@@ -208,7 +208,7 @@ class TLCDataLoader:
                 if len(cols) > 0:
                     df = df.filter((pl.col(cols[0]).hash(seed=42) % 100) < threshold)
 
-        print(f"⚙️ Ready columns: {features}")
+        print(f"Ready columns: {features}")
         # Return only requested columns (no derivation)
         return df.select(features).collect() if collect else df.select(features)
 
@@ -216,7 +216,7 @@ class TLCDataLoader:
     def list_features(self):
         """Print all available raw columns from the parquet files."""
         raw_cols = self._get_raw_columns()
-        print(f"\n📋 Available Columns ({len(raw_cols)} total):")
+        print(f"\nAvailable Columns ({len(raw_cols)} total):")
         for col in raw_cols:
             print(f" - {col}")
 
@@ -265,7 +265,7 @@ class TLCDataLoader:
         for i in range(0, len(months), batch_size):
             batch = months[i:i + batch_size]
             batch_num = i // batch_size + 1
-            print(f"\n🧩 Processing batch {batch_num}/{total_batches}: {batch}")
+            print(f"\nProcessing batch {batch_num}/{total_batches}: {batch}")
             
             df_part = self.load(
                 features=features,
@@ -274,11 +274,11 @@ class TLCDataLoader:
                 collect=True  # Always collect for batch processing
             )
             all_dfs.append(df_part)
-            print(f"   ✓ Batch {batch_num} completed: {len(df_part):,} rows")
+            print(f"Batch {batch_num} completed: {len(df_part):,} rows")
         
-        print(f"\n🔗 Merging {len(all_dfs)} batches...")
+        print(f"\nMerging {len(all_dfs)} batches...")
         df_final = pl.concat(all_dfs)
-        print(f"✅ Total rows: {len(df_final):,}")
+        print(f"Total rows: {len(df_final):,}")
         
         return df_final
 
