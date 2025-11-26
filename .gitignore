@@ -16,7 +16,7 @@ ENV/
 # Data files (raw data should not be committed)
 data/raw/
 data/taxi_zones/
-*.parquet
+# *.parquet
 *.csv
 *.xlsx
 *.xls
