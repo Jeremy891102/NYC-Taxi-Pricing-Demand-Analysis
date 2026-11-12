@@ -1,5 +1,22 @@
 🚕 NYC Taxi Pricing & Demand Analysis
 
+## Interactive pricing lab
+
+Explore the NYC zone map, adjust fares and assumed elasticity, and compare trip-volume / revenue indices. Historical observations and conditional scenarios are presented separately.
+
+[App source & local demo](web/) · [Method & data provenance](docs/interactive-lab.md)
+
+![Interactive NYC Taxi pricing lab](web/preview.png)
+
+```bash
+cd web
+npm test
+npm run dev
+# Open http://localhost:4173
+```
+
+---
+
 A large-scale analysis of NYC Taxi (TLC High Volume FHV) data —
 uncovering how price, demand, and revenue interact across time and space.
 
